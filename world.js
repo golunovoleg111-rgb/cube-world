@@ -1,5 +1,5 @@
 export const SIZE=64, HEIGHT=28;
-export const BLOCKS=[null,{name:'Дёрн',color:[.43,.66,.28]},{name:'Земля',color:[.48,.33,.22]},{name:'Камень',color:[.53,.57,.56]},{name:'Дерево',color:[.49,.32,.17]},{name:'Листва',color:[.27,.53,.28]},{name:'Песок',color:[.82,.77,.54]},{name:'Кристалл',color:[.36,.9,.87]}];
+export const BLOCKS=[null,{name:'Дёрн',color:[.43,.66,.28]},{name:'Земля',color:[.48,.33,.22]},{name:'Камень',color:[.53,.57,.56]},{name:'Дерево',color:[.49,.32,.17]},{name:'Листва',color:[.27,.53,.28]},{name:'Песок',color:[.82,.77,.54]},{name:'Кристалл',color:[.36,.9,.87]},{name:'Доски',color:[.7,.51,.29]},{name:'Кирпич',color:[.61,.35,.27]}];
 export const index=(x,y,z)=>x+SIZE*(z+SIZE*y);
 export function createWorld(seed){
  const data=new Uint8Array(SIZE*SIZE*HEIGHT);let state=seed>>>0;
@@ -28,10 +28,24 @@ export function createWorld(seed){
  return {data,get,set,seed,crystals,spawn:[32.5,levels[32+32*SIZE]+2,32.5]};
 }
 export function overlaps(world,p){
+ if(p.some(v=>!Number.isFinite(v))||Math.abs(p[1])>1000)return true;
  for(let x=Math.floor(p[0]-.28);x<=Math.floor(p[0]+.28);x++)for(let z=Math.floor(p[2]-.28);z<=Math.floor(p[2]+.28);z++)for(let y=Math.floor(p[1]);y<=Math.floor(p[1]+1.65);y++)if(world.get(x,y,z))return true;
  return p[0]<.3||p[0]>SIZE-.3||p[2]<.3||p[2]>SIZE-.3;
 }
-export function cast(world,origin,dir,reach=6){let prev=origin.map(Math.floor);for(let d=0;d<reach;d+=.035){const cell=origin.map((v,i)=>Math.floor(v+dir[i]*d));if(world.get(...cell))return {cell,previous:prev};prev=cell;}return null;}
+// Exact voxel traversal: the adjacent placement cell always shares the hit face.
+export function cast(world,origin,dir,reach=6){
+ const length=Math.hypot(...dir);if(!length)return null;
+ const ray=dir.map(v=>v/length),cell=origin.map(Math.floor),step=ray.map(Math.sign);
+ const delta=ray.map(v=>v===0?Infinity:Math.abs(1/v));
+ const next=ray.map((v,i)=>v===0?Infinity:((v>0?cell[i]+1:cell[i])-origin[i])/v);
+ let previous=[...cell],distance=0;
+ while(distance<=reach){
+  if(world.get(...cell))return {cell:[...cell],previous,distance};
+  const axis=next[0]<=next[1]&&next[0]<=next[2]?0:next[1]<=next[2]?1:2;
+  previous=[...cell];distance=next[axis];next[axis]+=delta[axis];cell[axis]+=step[axis];
+ }
+ return null;
+}
 export function restoreSave(raw){
  const s=JSON.parse(raw);
  if(s.version!==1||!Number.isInteger(s.seed)||!Array.isArray(s.edits)||s.edits.length>SIZE*SIZE*HEIGHT||!Array.isArray(s.position)||s.position.length!==3||s.position.some(v=>!Number.isFinite(v))||!Number.isFinite(s.yaw)||!Number.isFinite(s.pitch))throw Error('Invalid save');
