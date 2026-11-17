@@ -28,7 +28,7 @@ renderer.configure(settings);
 let active=null,world=createWorld(42),position=[...world.spawn],yaw=0,pitch=0;
 let state='menu',velocity=0,grounded=false,flying=false,selected=0,found=new Set(),edits=new Map(),dirty=false,target=null;
 let drag=null,toastTimer,saveClock=0,breath=10,waterDamage=0,elapsed=0,lastRender=0;
-let mobs=new MobSystem(world,42),attackCooldown=0,hotbar=PALETTE.slice(0,8),travelClock=0;
+let mobs=new MobSystem(world,42),attackCooldown=0,hotbar=PALETTE.slice(0,8),travelClock=0,invulnerable=0;
 const keys=new Set();
 renderer.rebuild(world);
 
@@ -116,12 +116,12 @@ function openInventory(){
 function select(n){selected=(n+8)%8;updateInventory();}
 function blockIcon(b){const icon=document.createElement('span');icon.className='block-icon';icon.style.backgroundColor=`rgb(${BLOCKS[b].color.map(v=>v*255).join(',')})`;return icon;}
 function updateInventory(){
-  const hotbar=$('hotbar'),grid=$('inventory-grid');hotbar.replaceChildren();grid.replaceChildren();
+  const barElement=$('hotbar'),grid=$('inventory-grid');barElement.replaceChildren();grid.replaceChildren();
   for(const [i,b] of hotbar.entries()){
     const count=creative()?'∞':String(active?.inventory[b]||0);
     const slot=document.createElement('button');slot.className='slot'+(selected===i?' selected':'');slot.setAttribute('aria-pressed',String(selected===i));slot.setAttribute('aria-label',`${BLOCKS[b].name}: ${count}`);
     const key=document.createElement('kbd');key.textContent=i+1;const label=document.createElement('small');label.textContent=BLOCKS[b].name;const quantity=document.createElement('span');quantity.className='count';quantity.textContent=count;
-    slot.append(key,blockIcon(b),label,quantity);slot.onclick=()=>select(i);hotbar.append(slot);
+    slot.append(key,blockIcon(b),label,quantity);slot.onclick=()=>select(i);barElement.append(slot);
   }
   for(const b of PALETTE){
     const count=creative()?'∞':String(active?.inventory[b]||0);
@@ -178,7 +178,8 @@ function interact(place=false){
   $('save-status').textContent='Есть несохранённые изменения';updateInventory();updateHUD();
 }
 function damage(amount){
-  if(creative())return;
+  if(creative()||invulnerable>0)return;
+  invulnerable=.6;
   $('damage-flash').classList.remove('visible');requestAnimationFrame(()=>$('damage-flash').classList.add('visible'));setTimeout(()=>$('damage-flash').classList.remove('visible'),220);
   active.health=Math.max(0,active.health-amount);dirty=true;
   if(active.health===0){active.health=20;active.hunger=20;position=safeSpawn();velocity=0;breath=10;renderer.rebuild(world,position);toast('Ты вернулся к точке появления. Собранные материалы сохранены.');}
@@ -276,7 +277,7 @@ let previous=performance.now(),hudClock=0;
 function frame(now){
   const dt=Math.min((now-previous)/1000,.04);previous=now;elapsed+=dt;saveClock+=dt;hudClock+=dt;
   if(state==='playing'){
-    active.time+=dt;attackCooldown=Math.max(0,attackCooldown-dt);renderer.stream(world,position);
+    active.time+=dt;attackCooldown=Math.max(0,attackCooldown-dt);invulnerable=Math.max(0,invulnerable-dt);renderer.stream(world,position);
     for(let i=0;i<3;i++)move(dt/3);
     if(!creative()){
       if(eye()[1]<world.seaLevel){breath=Math.max(0,breath-dt);if(breath===0){waterDamage+=dt;if(waterDamage>=1){damage(2);waterDamage=0;}}}else{breath=10;waterDamage=0;}
