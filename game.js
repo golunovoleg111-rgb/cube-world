@@ -1,5 +1,5 @@
 import {createWorld,overlaps,cast,BLOCKS,HEIGHT,SIZE} from './world.js?v=2';
-import {Renderer} from './renderer.js?v=2';
+import {Renderer} from './renderer.js?v=2.1';
 import {lookDirection,mouseLook} from './camera.js?v=2';
 import {Saves,DEFAULT_SETTINGS,PALETTE,RECIPES,craft} from './storage.js?v=2';
 
