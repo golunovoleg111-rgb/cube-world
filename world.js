@@ -1,5 +1,6 @@
 export const SIZE=64, HEIGHT=28;
 export const BLOCKS=[null,{name:'Дёрн',color:[.43,.66,.28]},{name:'Земля',color:[.48,.33,.22]},{name:'Камень',color:[.53,.57,.56]},{name:'Дерево',color:[.49,.32,.17]},{name:'Листва',color:[.27,.53,.28]},{name:'Песок',color:[.82,.77,.54]},{name:'Кристалл',color:[.36,.9,.87]},{name:'Доски',color:[.7,.51,.29]},{name:'Кирпич',color:[.61,.35,.27]}];
+BLOCKS.push({name:'Снег',color:[.88,.94,.96]},{name:'Терракота',color:[.65,.36,.22]},{name:'Угольная руда',color:[.31,.33,.33]},{name:'Факел',color:[1,.68,.19]});
 export const index=(x,y,z)=>x+SIZE*(z+SIZE*y);
 export function createWorld(seed){
  const data=new Uint8Array(SIZE*SIZE*HEIGHT);let state=seed>>>0;
@@ -25,12 +26,12 @@ export function createWorld(seed){
   let y=HEIGHT-1;while(y>0&&!get(x,y,z))y--;
   set(x,y+1,z,7);crystals.push([x,y+1,z]);
  }
- return {data,get,set,seed,crystals,spawn:[32.5,levels[32+32*SIZE]+2,32.5]};
+ return {data,get,set,seed,crystals,height:HEIGHT,seaLevel:4.8,infinite:false,spawn:[32.5,levels[32+32*SIZE]+2,32.5]};
 }
 export function overlaps(world,p){
  if(p.some(v=>!Number.isFinite(v))||Math.abs(p[1])>1000)return true;
- for(let x=Math.floor(p[0]-.28);x<=Math.floor(p[0]+.28);x++)for(let z=Math.floor(p[2]-.28);z<=Math.floor(p[2]+.28);z++)for(let y=Math.floor(p[1]);y<=Math.floor(p[1]+1.65);y++)if(world.get(x,y,z))return true;
- return p[0]<.3||p[0]>SIZE-.3||p[2]<.3||p[2]>SIZE-.3;
+ for(let x=Math.floor(p[0]-.28);x<=Math.floor(p[0]+.28);x++)for(let z=Math.floor(p[2]-.28);z<=Math.floor(p[2]+.28);z++)for(let y=Math.floor(p[1]);y<=Math.floor(p[1]+1.65);y++){const b=world.get(x,y,z);if(b&&b!==13)return true;}
+ return world.infinite?Math.abs(p[0])>999999||Math.abs(p[2])>999999:p[0]<.3||p[0]>SIZE-.3||p[2]<.3||p[2]>SIZE-.3;
 }
 // Exact voxel traversal: the adjacent placement cell always shares the hit face.
 export function cast(world,origin,dir,reach=6){
