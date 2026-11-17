@@ -1,0 +1,6 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {createWorld,overlaps,cast,restoreSave,SIZE,HEIGHT} from '../world.js';
+test('World generation is deterministic and spawn is walkable',()=>{for(const seed of [1,42,98213,4294967295]){const w=createWorld(seed);assert.deepEqual(w.data,createWorld(seed).data);assert.equal(overlaps(w,w.spawn),false);assert.equal(w.crystals.length,5);for(const c of w.crystals){assert.equal(w.get(...c),7);assert.ok(c[1]<HEIGHT-1)}}});
+test('Collision and ray targeting agree with placed blocks',()=>{const w=createWorld(2);w.set(30,22,30,3);assert.equal(overlaps(w,[30.5,22,30.5]),true);assert.deepEqual(cast(w,[30.5,22.5,33],[0,0,-1]).cell,[30,22,30]);assert.deepEqual(cast(w,[30.5,22.5,33],[0,0,-1]).previous,[30,22,31]);assert.equal(cast(w,[30.5,22.5,40],[0,0,-1]),null);assert.equal(w.get(-1,0,0),0);assert.equal(w.get(SIZE,0,0),0)});
+test('Save validation accepts edits and rejects corrupt or out of bounds data',()=>{const s={version:1,seed:42,edits:[[5,10,5,4]],position:[32,20,32],yaw:0,pitch:0,found:[0,2]};assert.deepEqual(restoreSave(JSON.stringify(s)),s);for(const edits of [[[0,0,0,0]],[[99,2,2,4]],[[2,3,2,7]],[[2,3,2,99]]])assert.throws(()=>restoreSave(JSON.stringify({...s,edits})));assert.throws(()=>restoreSave('{oops'));assert.throws(()=>restoreSave(JSON.stringify({...s,found:[8]})))});
