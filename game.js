@@ -8,7 +8,7 @@ import {MobSystem} from './mobs.js?v=4';
 import {tickVitals,dayLight} from './survival.js?v=4';
 import {DEFAULT_BAR,returnGrid} from './items.js?v=4';
 import {placement,toggleDoor,newBlockState,tickFurnace,bedSafe,cellKey} from './mechanisms.js?v=4';
-import {renderInventory,renderContext} from './inventory-ui.js?v=4';
+import {renderInventory,renderContext} from './inventory-ui.js?v=4.1';
 import {spacePress} from './controls.js?v=4';
 
 const $=id=>document.getElementById(id),canvas=$('world');
@@ -146,15 +146,15 @@ function updateHUD(){
   $('survival-status').textContent=creative()?(flying?'Полёт · Пробел ↑ · Shift ↓':'Двойной пробел — полёт · F5 — камера'):`♥ ${Math.ceil(active?.health||20)}/20 · Сытость ${Math.ceil(active?.hunger??20)}/20${breath<9?` · Воздух ${Math.ceil(breath)} с`:''}`;
 }
 function markEdit(cell,b){world.set(...cell,b);edits.set(cell.join(','),[...cell,b]);renderer.update(world,cell[0],cell[2]);dirty=true;}
-function useSelected(){
+function useSelected(shift=false){
  const b=hotbar[selected],id=target?world.get(...target.cell):0;
- if(target&&!keys.has('ShiftLeft')&&!keys.has('ShiftRight')){
+ if(target&&!shift&&!keys.has('ShiftLeft')&&!keys.has('ShiftRight')){
   if([15,16,31,32].includes(id)){for(const e of toggleDoor(world,target.cell)||[])markEdit(e.slice(0,3),e[3]);toast('Дверь переключена');return;}
   if([17,18,29].includes(id)){const key=cellKey(target.cell);active.blockStates[key]??=newBlockState(id,target.cell,yaw);openInventory({kind:id===17?'chest':id===18?'furnace':'craft',data:active.blockStates[key],cell:[...target.cell]});return;}
   if(id===19||id===44){const root=active.blockStates[cellKey(target.cell)]?.root||target.cell,p=bedSafe(world,root);if(!p){toast('Рядом с кроватью нужно свободное место');return;}active.respawn=p;active.respawnBed=cellKey(root);dirty=true;if(dayLight(active.time).night){if(mobs.mobs.some(m=>m.type==='hostile'&&Math.hypot(m.position[0]-position[0],m.position[2]-position[2])<8)){toast('Нельзя уснуть: рядом противники');return;}active.time=225;active.health=Math.min(20,active.health+4);toast('Доброе утро. Точка возрождения обновлена.');}else toast('Точка возрождения установлена. Спать можно ночью.');updateHUD();return;}
  }
  if(b===36||b===37){if(creative()){toast('В творчестве сытость не тратится');return;}if(!(active.inventory[b]>0)){toast('В выбранном слоте нет еды');return;}if(active.hunger>19){toast('Ты пока сыт');return;}active.inventory[b]--;active.hunger=Math.min(20,active.hunger+(b===37?8:3));dirty=true;handSwing=1;toast('Сытость восстановлена');updateInventory();updateHUD();return;}
- if(b===38){if(!creative()&&!(active.inventory[b]>0)){toast('Сначала создай путевой камень');return;}if(!active.waypoint||keys.has('ShiftLeft')||keys.has('ShiftRight')){active.waypoint=[...position];dirty=true;toast('Место отмечено. ПКМ — расстояние, Shift+ПКМ — перенести.');}else{const [x,,z]=active.waypoint;toast(`Метка: X ${Math.floor(x)}, Z ${Math.floor(z)} · ${Math.round(Math.hypot(x-position[0],z-position[2]))} м`);}return;}
+ if(b===38){if(!creative()&&!(active.inventory[b]>0)){toast('Сначала создай путевой камень');return;}if(!active.waypoint||shift||keys.has('ShiftLeft')||keys.has('ShiftRight')){active.waypoint=[...position];dirty=true;toast('Место отмечено. ПКМ — расстояние, Shift+ПКМ — перенести.');}else{const [x,,z]=active.waypoint;toast(`Метка: X ${Math.floor(x)}, Z ${Math.floor(z)} · ${Math.round(Math.hypot(x-position[0],z-position[2]))} м`);}return;}
  if(BLOCKS[b].item){toast('Этот предмет используется в рецептах');return;}
  if(!target)return;
  const cell=target.previous;
@@ -176,11 +176,11 @@ function destroyFunctional(cell,b){
  for(const c of cells){markEdit(c,0);delete active.blockStates[cellKey(c)];}
  return [15,16,31,32].includes(rootId)?15:rootId===44?19:rootId;
 }
-function interact(place=false){
+function interact(place=false,shift=false){
   if(state!=='playing')return;
   // Recompute at click time: never mine a stale target from the previous frame.
   target=cast(world,eye(),lookDirection(yaw,pitch));
-  if(place){useSelected();return;}
+  if(place){useSelected(shift);return;}
   handSwing=1;
   if(!place){const hit=mobs.pick(eye(),lookDirection(yaw,pitch),Math.min(4,target?.distance??4));if(hit){if(attackCooldown>0)return;const result=mobs.hit(hit.mob);active.inventory[36]=(active.inventory[36]||0)+result.food;if(result.killed&&hit.mob.type==='sheep')active.inventory[43]=(active.inventory[43]||0)+2;attackCooldown=.4;dirty=true;toast(result.killed?(result.food?`Добыто сырое мясо: ${result.food}`:'Враг побеждён'):'Попадание');updateInventory();return;}}
   if(!target)return;
@@ -271,7 +271,7 @@ document.addEventListener('keydown',event=>{
   if(['KeyE','KeyI'].includes(code)&&!event.repeat){openInventory();return;}
   keys.add(code);
   if(/^Digit[1-9]$/.test(code))select(Number(code.at(-1))-1);
-  if(!event.repeat&&code==='KeyR')interact();if(!event.repeat&&code==='KeyQ')interact(true);
+  if(!event.repeat&&code==='KeyR')interact();if(!event.repeat&&code==='KeyQ')interact(true,event.shiftKey);
   if(!event.repeat&&code==='Space'){const press=spacePress(lastSpace,performance.now(),creative());lastSpace=press.last;if(press.toggle){flying=!flying;velocity=0;lastSpace=0;updateHUD();toast(flying?'Полёт включён':'Полёт выключен');}}
   if(!event.repeat&&code==='F5'){event.preventDefault();thirdPerson=!thirdPerson;toast(thirdPerson?'Вид от третьего лица':'Вид от первого лица');}
 });
@@ -282,10 +282,10 @@ document.addEventListener('pointerlockchange',()=>{if(!document.pointerLockEleme
 canvas.addEventListener('contextmenu',event=>event.preventDefault());
 canvas.addEventListener('mousedown',event=>{
   if(state!=='playing'||![0,2].includes(event.button))return;
-  if(document.pointerLockElement===canvas)interact(event.button===2);
-  else drag={x:event.clientX,y:event.clientY,button:event.button,total:0};
+  if(document.pointerLockElement===canvas)interact(event.button===2,event.shiftKey);
+  else drag={x:event.clientX,y:event.clientY,button:event.button,total:0,shift:event.shiftKey};
 });
-document.addEventListener('mouseup',()=>{if(drag){if(drag.total<3)interact(drag.button===2);drag=null;}});
+document.addEventListener('mouseup',()=>{if(drag){if(drag.total<3)interact(drag.button===2,drag.shift);drag=null;}});
 document.addEventListener('mousemove',event=>{
   if(state!=='playing')return;
   let dx=0,dy=0;
