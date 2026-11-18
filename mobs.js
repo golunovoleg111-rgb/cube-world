@@ -1,5 +1,5 @@
-import {hash} from './terrain.js?v=3';
-import {cast} from './world.js?v=3';
+import {hash} from './terrain.js?v=4';
+import {cast,isSolid} from './world.js?v=4';
 export function rayBox(origin,dir,min,max,reach){
  let near=0,far=reach;
  for(let i=0;i<3;i++){
@@ -44,8 +44,8 @@ export class MobSystem{
     const next=[...p];next[axis]+=delta;
     if(!this.world.infinite&&(next[0]<1||next[0]>63||next[2]<1||next[2]>63)){mob.heading+=2;continue;}
     const x=Math.floor(next[0]),z=Math.floor(next[2]),y=Math.floor(p[1]);
-    if(this.world.get(x,y,z)||this.world.get(x,y+1,z)){
-      if(!this.world.get(x,y+1,z)&&!this.world.get(x,y+2,z)){p[1]=y+1.01;p[axis]+=delta;}else mob.heading+=dt*4;
+    if(isSolid(this.world.get(x,y,z))||isSolid(this.world.get(x,y+1,z))){
+      if(!isSolid(this.world.get(x,y+1,z))&&!isSolid(this.world.get(x,y+2,z))){p[1]=y+1.01;p[axis]+=delta;}else mob.heading+=dt*4;
     }else if(this.surface(x,z)>=this.world.seaLevel)p[axis]+=delta;
    }
    mob.vy=Math.max(-12,(mob.vy||0)-dt*18);const nextY=p[1]+mob.vy*dt;

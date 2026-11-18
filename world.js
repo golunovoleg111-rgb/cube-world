@@ -1,6 +1,18 @@
 export const SIZE=64, HEIGHT=28;
 export const BLOCKS=[null,{name:'Дёрн',color:[.43,.66,.28]},{name:'Земля',color:[.48,.33,.22]},{name:'Камень',color:[.53,.57,.56]},{name:'Дерево',color:[.49,.32,.17]},{name:'Листва',color:[.27,.53,.28]},{name:'Песок',color:[.82,.77,.54]},{name:'Кристалл',color:[.36,.9,.87]},{name:'Доски',color:[.7,.51,.29]},{name:'Кирпич',color:[.61,.35,.27]}];
 BLOCKS.push({name:'Снег',color:[.88,.94,.96]},{name:'Терракота',color:[.65,.36,.22]},{name:'Угольная руда',color:[.31,.33,.33]},{name:'Факел',color:[1,.68,.19]});
+for(const [name,color,props] of [
+ ['Стекло',[.7,.9,.94],{transparent:true}],['Дубовая дверь',[.62,.43,.23],{}],['Дверь · верх',[.62,.43,.23],{hidden:true}],
+ ['Сундук',[.64,.4,.16],{}],['Печь',[.42,.45,.46],{}],['Кровать',[.76,.22,.22],{}],
+ ['Берёзовое бревно',[.88,.85,.73],{}],['Берёзовая листва',[.49,.67,.27],{}],['Еловое бревно',[.33,.25,.18],{}],['Еловая хвоя',[.19,.36,.27],{}],
+ ['Песчаник',[.8,.71,.48],{}],['Булыжник',[.43,.47,.46],{}],['Каменный кирпич',[.51,.54,.53],{}],['Железная руда',[.62,.51,.43],{}],['Железный блок',[.8,.84,.85],{}],
+ ['Верстак',[.55,.38,.22],{}],['Фонарь',[1,.76,.32],{}],['Открытая дверь',[.62,.43,.23],{hidden:true,solid:false}],['Открытая дверь · верх',[.62,.43,.23],{hidden:true,solid:false}],
+ ['Цветы',[.9,.38,.38],{solid:false}],['Забор',[.58,.4,.24],{}],['Книжный шкаф',[.52,.36,.22],{}],
+ ['Сырое мясо',[.73,.34,.31],{item:true}],['Жареное мясо',[.57,.31,.18],{item:true}],['Путевой камень',[.34,.76,.77],{item:true}],['Железный слиток',[.76,.8,.82],{item:true}],['Палка',[.47,.32,.18],{item:true}],
+ ['Берёзовые доски',[.79,.71,.49],{}],['Еловые доски',[.39,.3,.22],{}],['Шерсть',[.9,.91,.86],{}],['Кровать · изножье',[.76,.22,.22],{hidden:true}],
+])BLOCKS.push({name,color,...props});
+export function isSolid(id){return !!id&&id!==13&&!BLOCKS[id]?.item&&BLOCKS[id]?.solid!==false;}
+export function isOpaque(id){return isSolid(id)&&!BLOCKS[id]?.transparent&&![15,16,19,30,34,44].includes(id);}
 export const index=(x,y,z)=>x+SIZE*(z+SIZE*y);
 export function createWorld(seed){
  const data=new Uint8Array(SIZE*SIZE*HEIGHT);let state=seed>>>0;
@@ -30,7 +42,7 @@ export function createWorld(seed){
 }
 export function overlaps(world,p){
  if(p.some(v=>!Number.isFinite(v))||Math.abs(p[1])>1000)return true;
- for(let x=Math.floor(p[0]-.28);x<=Math.floor(p[0]+.28);x++)for(let z=Math.floor(p[2]-.28);z<=Math.floor(p[2]+.28);z++)for(let y=Math.floor(p[1]);y<=Math.floor(p[1]+1.65);y++){const b=world.get(x,y,z);if(b&&b!==13)return true;}
+ for(let x=Math.floor(p[0]-.28);x<=Math.floor(p[0]+.28);x++)for(let z=Math.floor(p[2]-.28);z<=Math.floor(p[2]+.28);z++)for(let y=Math.floor(p[1]);y<=Math.floor(p[1]+1.65);y++){const b=world.get(x,y,z);if(isSolid(b))return true;}
  return world.infinite?Math.abs(p[0])>999999||Math.abs(p[2])>999999:p[0]<.3||p[0]>SIZE-.3||p[2]<.3||p[2]>SIZE-.3;
 }
 // Exact voxel traversal: the adjacent placement cell always shares the hit face.

@@ -53,5 +53,5 @@ test('World validation rejects impossible positions, items and health',()=>{
  for(const s of [{...makeSave(),position:[1e99,20,32]},{...makeSave(),inventory:{99:1}},{...makeSave(),health:0},{...makeSave(),edits:[[0,1,0,7]]}])assert.throws(()=>validateWorld(s));
 });
 test('Both texture detail levels contain deterministic, non-flat original water artwork',()=>{
- for(const size of [16,32]){const a=atlasPixels(size),b=atlasPixels(size);assert.equal(a.width,size*4);assert.deepEqual(a.data,b.data);const water=new Set();for(let y=0;y<size;y++)for(let x=0;x<size;x++){const i=((size*2+y)*a.width+size+x)*4;water.add(a.data[i]);assert.equal(a.data[i+3],255);}assert.ok(water.size>8);}
+ for(const size of [16,32]){const a=atlasPixels(size),b=atlasPixels(size);assert.equal(a.width,size*8);assert.deepEqual(a.data,b.data);const water=new Set();for(let y=0;y<size;y++)for(let x=0;x<size;x++){const i=((size+y)*a.width+size+x)*4;water.add(a.data[i]);assert.equal(a.data[i+3],255);}assert.ok(water.size>8);}
 });

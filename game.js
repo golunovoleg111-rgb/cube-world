@@ -1,12 +1,18 @@
-import {createWorld,overlaps,cast,BLOCKS,HEIGHT,SIZE} from './world.js?v=3';
-import {Renderer} from './renderer.js?v=3';
-import {lookDirection,mouseLook} from './camera.js?v=3';
-import {Saves,DEFAULT_SETTINGS,PALETTE,RECIPES,craft,canCraft} from './storage.js?v=3';
-import {createTerrainWorld,findSpawn,BIOMES} from './terrain.js?v=3';
-import {MobSystem} from './mobs.js?v=3';
-import {tickVitals,eat,dayLight} from './survival.js?v=3';
+import {createWorld,overlaps,cast,BLOCKS,HEIGHT,SIZE} from './world.js?v=4';
+import {Renderer,blockTile} from './renderer.js?v=4';
+import {atlasPixels} from './textures.js?v=4';
+import {lookDirection,mouseLook} from './camera.js?v=4';
+import {Saves,DEFAULT_SETTINGS,PALETTE} from './storage.js?v=4';
+import {createTerrainWorld,findSpawn,BIOMES} from './terrain.js?v=4';
+import {MobSystem} from './mobs.js?v=4';
+import {tickVitals,dayLight} from './survival.js?v=4';
+import {DEFAULT_BAR,returnGrid} from './items.js?v=4';
+import {placement,toggleDoor,newBlockState,tickFurnace,bedSafe,cellKey} from './mechanisms.js?v=4';
+import {renderInventory,renderContext} from './inventory-ui.js?v=4';
+import {spacePress} from './controls.js?v=4';
 
 const $=id=>document.getElementById(id),canvas=$('world');
+const iconAtlas=atlasPixels(32),iconCanvas=document.createElement('canvas');iconCanvas.width=iconCanvas.height=iconAtlas.width;iconCanvas.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(iconAtlas.data),iconAtlas.width,iconAtlas.width),0,0);const iconURL=iconCanvas.toDataURL();
 let renderer;
 try{renderer=new Renderer(canvas);}catch(error){$('unsupported').hidden=false;throw error;}
 let saves,settings={...DEFAULT_SETTINGS},savedWorlds=[];
@@ -28,7 +34,8 @@ renderer.configure(settings);
 let active=null,world=createWorld(42),position=[...world.spawn],yaw=0,pitch=0;
 let state='menu',velocity=0,grounded=false,flying=false,selected=0,found=new Set(),edits=new Map(),dirty=false,target=null;
 let drag=null,toastTimer,saveClock=0,breath=10,waterDamage=0,elapsed=0,lastRender=0;
-let mobs=new MobSystem(world,42),attackCooldown=0,hotbar=PALETTE.slice(0,8),travelClock=0,invulnerable=0;
+let mobs=new MobSystem(world,42),attackCooldown=0,hotbar=[...DEFAULT_BAR],travelClock=0,invulnerable=0;
+let interactionContext=null,lastSpace=0,thirdPerson=false,handSwing=0;
 const keys=new Set();
 renderer.rebuild(world);
 
@@ -50,20 +57,22 @@ function save(){
   }
 }
 function safeSpawn(){
+  if(active?.respawn){const p=[...active.respawn];if(!overlaps(world,p))return p;}
   const [sx,,sz]=world.spawn,x=Math.floor(sx),z=Math.floor(sz);let top=world.height-1;
   while(top>0&&!world.get(x,top,z))top--;
   return [x+.5,top+1.05,z+.5];
 }
 function loadWorld(data){
   if(!save())return false;
-  active=structuredClone(data);active.hunger??=20;active.food??=0;active.time??=225;active.crystals??=0;
-  world=active.generator==='continental-v1'?createTerrainWorld(active.seed,active.edits):createWorld(active.seed);
+  active=structuredClone(data);active.hunger??=20;active.time??=225;active.crystals??=0;active.blockStates??={};active.craftingGrid??=Array(9).fill(0);
+  if(active.food){active.inventory[37]=(active.inventory[37]||0)+active.food;active.food=0;}
+  world=active.generator?.startsWith('continental-')?createTerrainWorld(active.seed,active.edits,active.generator):createWorld(active.seed);world.states=active.blockStates;
   found=new Set(active.found);edits=new Map(active.edits.map(e=>[e.slice(0,3).join(','),e]));
   if(!world.infinite){for(const i of found)world.set(...world.crystals[i],0);for(const e of edits.values())world.set(...e);}
   position=[...active.position];yaw=active.yaw;pitch=Math.max(-1.5,Math.min(1.5,active.pitch));
   if(overlaps(world,position))position=safeSpawn();
-  velocity=0;grounded=false;flying=false;breath=10;dirty=false;target=null;
-  hotbar=active.hotbar?[...active.hotbar]:PALETTE.slice(0,8);mobs=new MobSystem(world,active.seed,active.entities);
+  velocity=0;grounded=false;flying=false;breath=10;dirty=false;target=null;interactionContext=null;lastSpace=0;thirdPerson=false;
+  hotbar=active.hotbar?[...active.hotbar]:[...DEFAULT_BAR];if(hotbar.length===8)hotbar.push(37);mobs=new MobSystem(world,active.seed,active.entities);
   renderer.rebuild(world,position);updateHUD();updateInventory();$('resume').hidden=false;
   $('save-status').textContent=active.name;return true;
 }
@@ -80,7 +89,7 @@ function worldList(){
     const icon=document.createElement('span');icon.className='world-icon';
     const details=document.createElement('div');details.className='world-details';
     const title=document.createElement('strong');title.textContent=w.name;
-    const subtitle=document.createElement('small');subtitle.textContent=`${w.mode==='creative'?'Творчество':'Выживание'} · ${w.generator==='continental-v1'?'Большой мир':'Классический остров'}`;
+    const subtitle=document.createElement('small');subtitle.textContent=`${w.mode==='creative'?'Творчество':'Выживание'} · ${w.generator==='continental-v2'?'Мир 256':w.generator==='continental-v1'?'Большой мир 96':'Классический остров'}`;
     details.append(title,subtitle);
     const play=document.createElement('button');play.textContent='Играть ↗';play.onclick=()=>{if(loadWorld(w))resume();};
     const remove=document.createElement('button');remove.className='delete-world';remove.textContent='✕';remove.setAttribute('aria-label','Удалить мир '+w.name);
@@ -92,6 +101,7 @@ function worldList(){
   }
 }
 function showMenu(){
+  if(active)returnGrid(active.inventory,active.craftingGrid,creative());
   state='menu';keys.clear();drag=null;document.exitPointerLock?.();
   $('menu').hidden=false;$('hud').hidden=true;$('inventory').hidden=true;
   $('inventory-button').hidden=true;$('pause-button').hidden=true;
@@ -99,6 +109,7 @@ function showMenu(){
 }
 async function resume(){
   if(!active)return;
+  returnGrid(active.inventory,active.craftingGrid,creative());interactionContext=null;dirty=true;
   if(matchMedia('(pointer:coarse)').matches){$('notice').textContent='Эта версия рассчитана на клавиатуру и мышь. Открой игру на компьютере.';return;}
   state='playing';$('menu').hidden=true;$('hud').hidden=false;$('inventory').hidden=true;
   $('inventory-button').hidden=false;$('pause-button').hidden=false;keys.clear();
@@ -108,37 +119,23 @@ async function resume(){
     await canvas.requestPointerLock();
   }catch{toast('Обзор: зажми мышь и тяни. R — добыть, Q — поставить.');}
 }
-function openInventory(){
+function openInventory(context=null){
   if(state!=='playing')return;
   state='inventory';keys.clear();drag=null;document.exitPointerLock?.();
-  $('inventory').hidden=false;updateInventory();save();
+  interactionContext=context;$('inventory').hidden=false;updateInventory();save();
 }
-function select(n){selected=(n+8)%8;updateInventory();}
-function blockIcon(b){const icon=document.createElement('span');icon.className='block-icon';icon.style.backgroundColor=`rgb(${BLOCKS[b].color.map(v=>v*255).join(',')})`;return icon;}
+function select(n){selected=(n+9)%9;updateInventory();}
+function blockIcon(b){const icon=document.createElement('span');icon.className='block-icon';const tile=blockTile(b,0);icon.style.backgroundImage=`url(${iconURL})`;icon.style.backgroundSize='800% 800%';icon.style.backgroundPosition=`${tile%8/7*100}% ${Math.floor(tile/8)/7*100}%`;if(b===36||b===37){icon.textContent='🍖';icon.style.background='transparent';}if(b===38)icon.textContent='◈';return icon;}
+function inventoryAPI(){return {player:active,creative:creative(),hotbar,selected,icon:blockIcon,changed:()=>{dirty=true;},notify:toast,context:interactionContext,onDay:()=>{active.time=dayLight(active.time).night?225:675;dirty=true;updateHUD();}};}
 function updateInventory(){
-  const barElement=$('hotbar'),grid=$('inventory-grid');barElement.replaceChildren();grid.replaceChildren();
+  const barElement=$('hotbar');barElement.replaceChildren();
   for(const [i,b] of hotbar.entries()){
     const count=creative()?'∞':String(active?.inventory[b]||0);
     const slot=document.createElement('button');slot.className='slot'+(selected===i?' selected':'');slot.setAttribute('aria-pressed',String(selected===i));slot.setAttribute('aria-label',`${BLOCKS[b].name}: ${count}`);
     const key=document.createElement('kbd');key.textContent=i+1;const label=document.createElement('small');label.textContent=BLOCKS[b].name;const quantity=document.createElement('span');quantity.className='count';quantity.textContent=count;
     slot.append(key,blockIcon(b),label,quantity);slot.onclick=()=>select(i);barElement.append(slot);
   }
-  for(const b of PALETTE){
-    const count=creative()?'∞':String(active?.inventory[b]||0);
-    const item=document.createElement('button');item.className='inventory-item'+(hotbar[selected]===b?' selected':'');item.setAttribute('aria-pressed',String(hotbar[selected]===b));
-    const name=document.createElement('span');name.textContent=BLOCKS[b].name;const qty=document.createElement('small');qty.textContent=creative()?'Без ограничений':`В запасе: ${count}`;
-    item.append(blockIcon(b),name,qty);item.onclick=()=>{hotbar[selected]=b;dirty=!!active;updateInventory();};grid.append(item);
-  }
-  $('inventory-description').textContent=creative()?'Все материалы бесконечны. Нажми на блок, чтобы назначить его в выбранный быстрый слот. F — полёт.':`Добывай ресурсы и собирай еду. Нажми на материал, чтобы назначить его в выбранный слот. Еда: ${active?.food||0}.`;
-  $('eat-button').textContent=`Поесть (+6 сытости) · Еда: ${active?.food||0}`;$('eat-button').disabled=creative()||!active?.food||(active?.hunger??20)>=20;
-  $('time-button').hidden=!creative();
-  const recipes=$('recipes');recipes.replaceChildren();
-  for(const recipe of RECIPES){
-    const row=document.createElement('div');row.className='recipe';const text=document.createElement('span');text.textContent=(recipe.ingredients||[[recipe.input,recipe.cost]]).map(([b,n])=>`${BLOCKS[b].name} × ${n}`).join(' + ')+` → ${BLOCKS[recipe.output].name} × ${recipe.count}`;
-    const button=document.createElement('button');button.textContent='Создать';button.disabled=!canCraft(active?.inventory||{},recipe,active?.mode);
-    button.onclick=()=>{if(craft(active.inventory,recipe,active.mode)){dirty=true;updateInventory();toast(`Создано: ${BLOCKS[recipe.output].name} × ${recipe.count}`);}};
-    row.append(text,button);recipes.append(row);
-  }
+  if(active&&state==='inventory')renderInventory(inventoryAPI());
 }
 function updateHUD(){
   $('mode-label').textContent=creative()?`ТВОРЧЕСТВО${flying?' · ПОЛЁТ':''}`:'ВЫЖИВАНИЕ';
@@ -146,14 +143,46 @@ function updateHUD(){
   const phase=dayLight(active?.time??225);
   $('quest-title').textContent=biome;
   $('quest-progress').textContent=`${phase.night?'Ночь · остерегайся теней':'День · исследуй мир'} · Кристаллы ${world.infinite?active?.crystals||0:found.size}`;
-  $('survival-status').textContent=creative()?(flying?'Полёт · Пробел ↑ · Shift ↓':'F — полёт · B — путевой камень'):`♥ ${Math.ceil(active?.health||20)}/20 · Сытость ${Math.ceil(active?.hunger??20)}/20 · Еда ${active?.food||0} (C)${breath<9?` · Воздух ${Math.ceil(breath)} с`:''}`;
+  $('survival-status').textContent=creative()?(flying?'Полёт · Пробел ↑ · Shift ↓':'Двойной пробел — полёт · F5 — камера'):`♥ ${Math.ceil(active?.health||20)}/20 · Сытость ${Math.ceil(active?.hunger??20)}/20${breath<9?` · Воздух ${Math.ceil(breath)} с`:''}`;
 }
 function markEdit(cell,b){world.set(...cell,b);edits.set(cell.join(','),[...cell,b]);renderer.update(world,cell[0],cell[2]);dirty=true;}
+function useSelected(){
+ const b=hotbar[selected],id=target?world.get(...target.cell):0;
+ if(target&&!keys.has('ShiftLeft')&&!keys.has('ShiftRight')){
+  if([15,16,31,32].includes(id)){for(const e of toggleDoor(world,target.cell)||[])markEdit(e.slice(0,3),e[3]);toast('Дверь переключена');return;}
+  if([17,18,29].includes(id)){const key=cellKey(target.cell);active.blockStates[key]??=newBlockState(id,target.cell,yaw);openInventory({kind:id===17?'chest':id===18?'furnace':'craft',data:active.blockStates[key],cell:[...target.cell]});return;}
+  if(id===19||id===44){const root=active.blockStates[cellKey(target.cell)]?.root||target.cell,p=bedSafe(world,root);if(!p){toast('Рядом с кроватью нужно свободное место');return;}active.respawn=p;active.respawnBed=cellKey(root);dirty=true;if(dayLight(active.time).night){if(mobs.mobs.some(m=>m.type==='hostile'&&Math.hypot(m.position[0]-position[0],m.position[2]-position[2])<8)){toast('Нельзя уснуть: рядом противники');return;}active.time=225;active.health=Math.min(20,active.health+4);toast('Доброе утро. Точка возрождения обновлена.');}else toast('Точка возрождения установлена. Спать можно ночью.');updateHUD();return;}
+ }
+ if(b===36||b===37){if(creative()){toast('В творчестве сытость не тратится');return;}if(!(active.inventory[b]>0)){toast('В выбранном слоте нет еды');return;}if(active.hunger>19){toast('Ты пока сыт');return;}active.inventory[b]--;active.hunger=Math.min(20,active.hunger+(b===37?8:3));dirty=true;handSwing=1;toast('Сытость восстановлена');updateInventory();updateHUD();return;}
+ if(b===38){if(!creative()&&!(active.inventory[b]>0)){toast('Сначала создай путевой камень');return;}if(!active.waypoint||keys.has('ShiftLeft')||keys.has('ShiftRight')){active.waypoint=[...position];dirty=true;toast('Место отмечено. ПКМ — расстояние, Shift+ПКМ — перенести.');}else{const [x,,z]=active.waypoint;toast(`Метка: X ${Math.floor(x)}, Z ${Math.floor(z)} · ${Math.round(Math.hypot(x-position[0],z-position[2]))} м`);}return;}
+ if(BLOCKS[b].item){toast('Этот предмет используется в рецептах');return;}
+ if(!target)return;
+ const cell=target.previous;
+ if(!creative()&&!(active.inventory[b]>0)){toast('Нет материала в выбранном слоте');return;}
+ const cells=placement(world,cell,b,yaw);if(!cells){toast('Недостаточно свободного места');return;}
+ for(const e of cells)world.set(...e);const blocked=overlaps(world,position);for(const e of cells)world.set(...e.slice(0,3),0);if(blocked)return;
+ if(!creative())active.inventory[b]--;
+ const baseKey=cellKey(cell);if([15,17,18,19,29].includes(b)){active.blockStates[baseKey]=newBlockState(b,cell,yaw);if(cells.length>1)active.blockStates[cellKey(cells[1].slice(0,3))]={root:[...cell],facing:active.blockStates[baseKey].facing};}
+ for(const e of cells)markEdit(e.slice(0,3),e[3]);handSwing=1;updateInventory();
+}
+function destroyFunctional(cell,b){
+ let root=[...cell];const metadata=active.blockStates[cellKey(cell)];if(metadata?.root)root=[...metadata.root];else if([16,32].includes(b))root[1]--;
+ const rootId=world.get(...root),state=active.blockStates[cellKey(root)],cells=[root];
+ if(rootId===19&&active.respawnBed===cellKey(root)){delete active.respawn;delete active.respawnBed;}
+ if([15,31].includes(rootId))cells.push([root[0],root[1]+1,root[2]]);
+ if(rootId===19&&state?.partner)cells.push(state.partner);
+ if(state?.contents)for(const [id,n] of Object.entries(state.contents))active.inventory[id]=(active.inventory[id]||0)+n;
+ if(rootId===18&&state){for(const [id,n] of [[state.input,state.inputCount],[state.output,state.outputCount],[12,state.fuel]])if(id&&n)active.inventory[id]=(active.inventory[id]||0)+n;}
+ for(const c of cells){markEdit(c,0);delete active.blockStates[cellKey(c)];}
+ return [15,16,31,32].includes(rootId)?15:rootId===44?19:rootId;
+}
 function interact(place=false){
   if(state!=='playing')return;
   // Recompute at click time: never mine a stale target from the previous frame.
   target=cast(world,eye(),lookDirection(yaw,pitch));
-  if(!place){const hit=mobs.pick(eye(),lookDirection(yaw,pitch),Math.min(4,target?.distance??4));if(hit){if(attackCooldown>0)return;const result=mobs.hit(hit.mob);active.food+=result.food;attackCooldown=.4;dirty=true;toast(result.killed?(result.food?`Добыта еда: ${result.food}`:'Враг побеждён'):'Попадание');updateInventory();return;}}
+  if(place){useSelected();return;}
+  handSwing=1;
+  if(!place){const hit=mobs.pick(eye(),lookDirection(yaw,pitch),Math.min(4,target?.distance??4));if(hit){if(attackCooldown>0)return;const result=mobs.hit(hit.mob);active.inventory[36]=(active.inventory[36]||0)+result.food;if(result.killed&&hit.mob.type==='sheep')active.inventory[43]=(active.inventory[43]||0)+2;attackCooldown=.4;dirty=true;toast(result.killed?(result.food?`Добыто сырое мясо: ${result.food}`:'Враг побеждён'):'Попадание');updateInventory();return;}}
   if(!target)return;
   const cell=place?target.previous:target.cell,[x,y,z]=cell;
   if(y<1){toast('Основание острова нельзя разрушить');return;}
@@ -171,8 +200,8 @@ function interact(place=false){
       if(world.infinite){active.crystals++;markEdit(cell,0);}else{const i=world.crystals.findIndex(c=>c.every((v,j)=>v===cell[j]));if(i>=0)found.add(i);world.set(...cell,0);renderer.update(world,x,z);}
       dirty=true;toast(`Кристалл найден! ${world.infinite?active.crystals:found.size}`);
     }else{
-      if(!creative())active.inventory[b]=(active.inventory[b]||0)+1;
-      markEdit(cell,0);
+      const drop=destroyFunctional(cell,b);
+      if(!creative())active.inventory[drop]=(active.inventory[drop]||0)+1;
     }
   }
   $('save-status').textContent='Есть несохранённые изменения';updateInventory();updateHUD();
@@ -228,14 +257,11 @@ $('create-form').onsubmit=event=>{
   const text=$('world-seed').value.trim();let seed=(Math.random()*4294967296)>>>0;
   if(text){seed=2166136261;for(const char of text)seed=Math.imul(seed^char.codePointAt(0),16777619)>>>0;}
   const generator=$('world-generator').value;
-  const spawn=generator==='continental-v1'?findSpawn(seed):createWorld(seed).spawn;
-  const data={version:3,generator,id:globalThis.crypto?.randomUUID?.()||`${Date.now()}-${seed}`,name:$('world-name').value.trim()||'Новый мир',mode:$('world-mode').value,seed,position:[...spawn],yaw:0,pitch:0,edits:[],found:[],inventory:{},health:20,hunger:20,food:2,time:225,crystals:0,updated:Date.now()};
+  const spawn=generator.startsWith('continental-')?findSpawn(seed,generator):createWorld(seed).spawn;
+  const data={version:4,generator,id:globalThis.crypto?.randomUUID?.()||`${Date.now()}-${seed}`,name:$('world-name').value.trim()||'Новый мир',mode:$('world-mode').value,seed,position:[...spawn],yaw:0,pitch:0,edits:[],found:[],inventory:{37:2},health:20,hunger:20,food:0,time:225,crystals:0,blockStates:{},craftingGrid:Array(9).fill(0),updated:Date.now()};
   if(loadWorld(data)){dirty=true;save();worldList();resume();}
 };
-$('resume').onclick=resume;$('pause-button').onclick=showMenu;$('inventory-button').onclick=openInventory;$('close-inventory').onclick=resume;
-function haveMeal(){if(active&&!creative()&&eat(active)){dirty=true;toast('Сытость восстановлена');updateHUD();updateInventory();}}
-$('eat-button').onclick=haveMeal;
-$('time-button').onclick=()=>{if(!creative())return;active.time=dayLight(active.time).night?225:675;dirty=true;toast(dayLight(active.time).night?'Наступила ночь':'Наступил день');updateHUD();};
+$('resume').onclick=resume;$('pause-button').onclick=showMenu;$('inventory-button').onclick=()=>openInventory();$('close-inventory').onclick=resume;
 document.addEventListener('keydown',event=>{
   if(state==='menu')return;
   const code=event.code;
@@ -244,12 +270,10 @@ document.addEventListener('keydown',event=>{
   if(['Escape','KeyP'].includes(code)){showMenu();return;}
   if(['KeyE','KeyI'].includes(code)&&!event.repeat){openInventory();return;}
   keys.add(code);
-  if(/^Digit[1-8]$/.test(code))select(Number(code.at(-1))-1);
+  if(/^Digit[1-9]$/.test(code))select(Number(code.at(-1))-1);
   if(!event.repeat&&code==='KeyR')interact();if(!event.repeat&&code==='KeyQ')interact(true);
-  if(!event.repeat&&code==='KeyC')haveMeal();
-  if(!event.repeat&&code==='KeyB'){if(active.waypoint){const [x,,z]=active.waypoint;toast(`Путевой камень: X ${Math.floor(x)}, Z ${Math.floor(z)} · ${Math.round(Math.hypot(x-position[0],z-position[2]))} м`);}else{active.waypoint=[...position];dirty=true;toast('Путевой камень установлен. B — расстояние, Shift+B — перенести.');}}
-  if(!event.repeat&&code==='KeyB'&&event.shiftKey){active.waypoint=[...position];dirty=true;toast('Путевой камень перенесён');}
-  if(!event.repeat&&code==='KeyF'&&creative()){flying=!flying;velocity=0;updateHUD();toast(flying?'Полёт включён':'Полёт выключен');}
+  if(!event.repeat&&code==='Space'){const press=spacePress(lastSpace,performance.now(),creative());lastSpace=press.last;if(press.toggle){flying=!flying;velocity=0;lastSpace=0;updateHUD();toast(flying?'Полёт включён':'Полёт выключен');}}
+  if(!event.repeat&&code==='F5'){event.preventDefault();thirdPerson=!thirdPerson;toast(thirdPerson?'Вид от третьего лица':'Вид от первого лица');}
 });
 document.addEventListener('keyup',event=>keys.delete(event.code));
 window.addEventListener('blur',()=>{if(state==='playing')showMenu();});
@@ -276,6 +300,8 @@ canvas.addEventListener('webglcontextlost',event=>{event.preventDefault();showMe
 let previous=performance.now(),hudClock=0;
 function frame(now){
   const dt=Math.min((now-previous)/1000,.04);previous=now;elapsed+=dt;saveClock+=dt;hudClock+=dt;
+  handSwing=Math.max(0,handSwing-dt*3);
+  if(active&&state!=='menu'){for(const [key,block] of Object.entries(active.blockStates)){if(block.inputCount===undefined)continue;const wasBurning=block.burn>0;if(tickFurnace(block,dt)){dirty=true;if(wasBurning!==(block.burn>0)){const cell=key.split(',').map(Number);renderer.update(world,cell[0],cell[2]);}}}if(state==='inventory'&&interactionContext?.kind==='furnace'&&hudClock>.35){renderContext(inventoryAPI());hudClock=0;}}
   if(state==='playing'){
     active.time+=dt;attackCooldown=Math.max(0,attackCooldown-dt);invulnerable=Math.max(0,invulnerable-dt);renderer.stream(world,position);
     for(let i=0;i<3;i++)move(dt/3);
@@ -287,7 +313,8 @@ function frame(now){
     travelClock+=dt;if(travelClock>1){dirty=true;travelClock=0;}
     target=cast(world,eye(),lookDirection(yaw,pitch));
     const mobTarget=mobs.pick(eye(),lookDirection(yaw,pitch),Math.min(4,target?.distance??4));
-    renderer.render(eye(),yaw,pitch,active.time,mobTarget?null:target,mobs.mobs,hotbar[selected]===13&&(creative()||active.inventory[13]>0));
+    const direction=lookDirection(yaw,pitch);let renderEye=eye();if(thirdPerson){const backwards=direction.map(v=>-v),wall=cast(world,eye(),backwards,4),distance=wall?Math.max(.2,wall.distance-.2):4;renderEye=eye().map((v,i)=>v-direction[i]*distance);}
+    renderer.render(renderEye,yaw,pitch,active.time,mobTarget?null:target,mobs.mobs,[13,30].includes(hotbar[selected])&&(creative()||active.inventory[hotbar[selected]]>0),{position,thirdPerson,item:creative()||active.inventory[hotbar[selected]]>0?hotbar[selected]:0,swing:handSwing,moving:['KeyW','KeyA','KeyS','KeyD'].some(k=>keys.has(k))});
     if(hudClock>.1){$('target').textContent=mobTarget?`${mobTarget.mob.type==='hostile'?'Ночной бродяга':mobTarget.mob.type==='sheep'?'Овца':'Олень'} · ♥ ${Math.ceil(mobTarget.mob.health)}`:target?BLOCKS[world.get(...target.cell)]?.name||'':'';$('coordinates').textContent=`${active.name} · X ${Math.floor(position[0])} Y ${Math.floor(position[1])} Z ${Math.floor(position[2])}`;updateHUD();hudClock=0;}
   }else if(now-lastRender>40){renderer.render(active?eye():[49,24,53],active?yaw:.65,active?pitch:-.38,active?.time??225,null,active?mobs.mobs:[]);lastRender=now;}
   if(saveClock>4){save();saveClock=0;}requestAnimationFrame(frame);

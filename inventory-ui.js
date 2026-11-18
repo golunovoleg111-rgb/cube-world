@@ -1,0 +1,35 @@
+import {BLOCKS} from './world.js?v=4';
+import {MATERIALS,RECIPES,canMake,fillRecipe,matchRecipe,completeCraft} from './items.js?v=4';
+import {FURNACE_RECIPES,moveStack} from './mechanisms.js?v=4';
+let chosen=8,query='';
+const $=id=>document.getElementById(id);
+function element(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text!==undefined)e.textContent=text;return e;}
+function slot(item,count,icon,action){const e=element('button','inv-slot');e.type='button';if(item){e.title=BLOCKS[item].name;e.setAttribute('aria-label',`${BLOCKS[item].name} · ${count}`);e.append(icon(item));if(count!==1)e.append(element('small','stack-count',String(count)));e.draggable=true;e.ondragstart=event=>event.dataTransfer.setData('text/plain',String(item));}else e.setAttribute('aria-label','Пустая ячейка');e.onclick=action;return e;}
+function avatar(){return '<div class="avatar-head"></div><div class="avatar-body"></div><div class="avatar-arm left"></div><div class="avatar-arm right"></div><div class="avatar-leg left"></div><div class="avatar-leg right"></div>';}
+export function renderInventory(api){
+ const {player,creative,hotbar,selected,icon,changed}=api,grid=player.craftingGrid;
+ $('inventory-description').textContent=creative?'Творчество · выбери предмет в каталоге и нажми на быстрый слот.':'Выбери предмет для сетки крафта или перетащи его. Клик по быстрому слоту назначит выбранный предмет.';
+ $('player-preview').innerHTML=avatar();
+ const bag=$('inventory-grid');bag.replaceChildren();
+ const entries=creative?MATERIALS.map(b=>[b,'∞']):Object.entries(player.inventory).filter(([,n])=>n>0).flatMap(([b,n])=>{const out=[];for(let left=n;left>0;left-=64)out.push([Number(b),Math.min(64,left)]);return out;});
+ for(let i=0;i<Math.max(27,entries.length);i++){const [b,n]=entries[i]||[0,0];const button=slot(b,n,icon,()=>{if(!b)return;chosen=b;$('selected-item').textContent='Выбрано: '+BLOCKS[b].name;if(api.context?.kind==='chest'){const contents=api.context.data.contents,used=Object.values(contents).reduce((s,v)=>s+Math.ceil(v/64),0),room=used<27?64:contents[b]%64?64-contents[b]%64:0;if(!room){api.notify('Сундук заполнен');return;}if(creative)contents[b]=(contents[b]||0)+room;else moveStack(player.inventory,contents,b,room);changed();renderInventory(api);}});button.classList.toggle('chosen',b===chosen);bag.append(button);}
+ $('selected-item').textContent='Выбрано: '+BLOCKS[chosen].name;
+ const bar=$('inventory-hotbar');bar.replaceChildren();hotbar.forEach((b,i)=>{const button=slot(b,creative?'∞':player.inventory[b]||0,icon,()=>{hotbar[i]=chosen;changed();renderInventory(api);});button.classList.toggle('selected',i===selected);button.ondragover=e=>e.preventDefault();button.ondrop=e=>{e.preventDefault();const item=Number(e.dataTransfer.getData('text/plain'));if(MATERIALS.includes(item)){hotbar[i]=item;changed();renderInventory(api);}};bar.append(button);});
+ const craftGrid=$('craft-grid');craftGrid.replaceChildren();
+ for(let i=0;i<9;i++){const button=slot(grid[i],1,icon,()=>{if(grid[i]){if(!creative)player.inventory[grid[i]]=(player.inventory[grid[i]]||0)+1;grid[i]=0;}else if(creative||player.inventory[chosen]>0){grid[i]=chosen;if(!creative)player.inventory[chosen]--;}changed();renderInventory(api);});button.ondragover=e=>e.preventDefault();button.ondrop=e=>{e.preventDefault();const item=Number(e.dataTransfer.getData('text/plain'));if(!MATERIALS.includes(item))return;chosen=item;button.click();};craftGrid.append(button);}
+ const recipe=matchRecipe(grid),result=$('craft-result');result.replaceChildren();const output=slot(recipe?.output,recipe?.count,icon,()=>{const r=completeCraft(player.inventory,grid);if(r){changed();api.notify(`Создано: ${BLOCKS[r.output].name} × ${r.count}`);renderInventory(api);}});output.disabled=!recipe;result.append(output);
+ const search=$('recipe-search');search.value=query;search.oninput=()=>{query=search.value;renderRecipes(api);};renderRecipes(api);renderContext(api);
+ $('time-button').hidden=!creative;$('time-button').onclick=api.onDay;
+}
+function renderRecipes(api){const list=$('recipes'),available={...api.player.inventory};for(const b of api.player.craftingGrid)if(b)available[b]=(available[b]||0)+1;list.replaceChildren();for(const recipe of RECIPES.filter(r=>r.name.toLowerCase().includes(query.toLowerCase()))){const button=element('button','recipe-entry');button.append(api.icon(recipe.output),element('span','',recipe.name),element('small','',`× ${recipe.count}`));button.disabled=!canMake(available,recipe,api.creative);button.title=recipe.shape.map(row=>row.map(b=>BLOCKS[b]?.name||'—').join(' · ')).join('\n');button.onclick=()=>{fillRecipe(api.player.inventory,api.player.craftingGrid,recipe,api.creative);api.changed();renderInventory(api);};list.append(button);}}
+export function renderContext(api){
+ const panel=$('interaction-panel');panel.replaceChildren();panel.hidden=!api.context;if(!api.context)return;
+ const {kind,data}=api.context;panel.append(element('h3','',kind==='chest'?'Сундук':kind==='furnace'?'Печь':'Верстак'));
+ if(kind==='chest'){panel.append(element('p','muted','Нажми на предмет в рюкзаке, чтобы положить стопку. Нажми на стопку в сундуке, чтобы забрать.'));const grid=element('div','chest-grid');let count=0;for(const [id,n] of Object.entries(data.contents)){for(let left=n;left>0;left-=64){const amount=Math.min(64,left);grid.append(slot(Number(id),amount,api.icon,()=>{moveStack(data.contents,api.player.inventory,id,amount);api.changed();renderInventory(api);}));count++;}}while(count++<27)grid.append(slot(0,0,api.icon,()=>{}));panel.append(grid);}
+ if(kind==='furnace'){
+  const summary=element('p','furnace-status',`Вход: ${BLOCKS[data.input]?.name||'—'} × ${data.inputCount} · Уголь: ${data.fuel} · Нагрев: ${Math.ceil(data.burn)} с`);panel.append(summary);
+  const progress=element('progress');progress.max=6;progress.value=data.progress;panel.append(progress);
+  const row=element('div','row');const input=element('button','quiet','Загрузить выбранный предмет');input.disabled=!FURNACE_RECIPES[chosen]||(!api.creative&&!(api.player.inventory[chosen]>0))||(data.inputCount>0&&data.input!==chosen);input.onclick=()=>{const n=Math.min(64-data.inputCount,api.creative?64:api.player.inventory[chosen]||0);if(n<=0)return;data.input=chosen;data.inputCount+=n;if(!api.creative)api.player.inventory[chosen]-=n;api.changed();renderInventory(api);};
+  const fuel=element('button','quiet','Добавить уголь');fuel.disabled=!api.creative&&!(api.player.inventory[12]>0);fuel.onclick=()=>{if(data.fuel>=64)return;data.fuel++;if(!api.creative)api.player.inventory[12]--;api.changed();renderInventory(api);};
+  const take=element('button','quiet',`Забрать: ${BLOCKS[data.output]?.name||'—'} × ${data.outputCount}`);take.disabled=!data.outputCount;take.onclick=()=>{api.player.inventory[data.output]=(api.player.inventory[data.output]||0)+data.outputCount;data.outputCount=0;data.output=0;api.changed();renderInventory(api);};row.append(input,fuel,take);panel.append(row,element('p','muted','Песок → стекло · Железная руда → слиток · Сырое мясо → жареное · Булыжник → камень. Одна плавка — 6 секунд.'));}
+}
